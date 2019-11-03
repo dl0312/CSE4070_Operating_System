@@ -62,7 +62,6 @@ start_process (void *file_name_)
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
-  // debug - taeguk but not working hihi
   printf("🤖 start_process()\n");
   success = load (file_name, &if_.eip, &if_.esp);
 
@@ -94,6 +93,10 @@ int
 process_wait (tid_t child_tid UNUSED) 
 {
   // must be implemented
+
+  int i,j;
+  for(i=0; i<30000; ++i)
+    for(j=0; j<10000; ++j);
   return -1;
 }
 
@@ -220,8 +223,8 @@ load (const char *file_name, void (**eip) (void), void **esp)
   off_t file_ofset;
   bool success = false;
   int i;
-  int filename_len, argv_size, tmp_argv_size, align_size;
-  char *cpy_file_name, *argv_ptr, *name_ptr;
+  int filename_len, argv_size, argv_size_tmp, align_size;
+  char *file_name_copy, *argv_ptr, *name_ptr;
   bool skip_flag;
   // argc 는, 프로그램을 실행할 때 지정해 준 "명령행 옵션"의 "개수"가 저장되는 곳입니다.
   int argc = 0;
@@ -234,44 +237,45 @@ load (const char *file_name, void (**eip) (void), void **esp)
     goto done;
   process_activate ();
 
-  // To be added parsing file_name - taeguk
+  // To be added parsing file_name
   // file_name contains program file name and arguments.
   // file_name is reset to purely program file name.
   
   printf("🤖 debug 1\n");
   
   filename_len = strlen(file_name);
-  cpy_file_name = (char*) malloc(filename_len + 1);
+  file_name_copy = (char*) malloc(filename_len + 1);
 
   skip_flag = false;
-  for(i = 0, tmp_argv_size = 0; file_name[i]; ++i)
+  for(i = 0, argv_size_tmp = 0; file_name[i]; ++i)
     {
       if(file_name[i] == ' ' || file_name[i] == '\t')
         {
           if(skip_flag)
               continue;
-          cpy_file_name[tmp_argv_size++] = 0;
-          ++argv_size;
+          file_name_copy[argv_size_tmp++] = 0;
           ++argc;
           skip_flag = true;
         }
       else
         {
-          cpy_file_name[tmp_argv_size++] = file_name[i];
+          file_name_copy[argv_size_tmp++] = file_name[i];
           skip_flag = false;
         }
     }
 
-  if(!skip_flag)
-      cpy_file_name[tmp_argv_size++] = 0;
+  if(!skip_flag){
+      file_name_copy[argv_size_tmp++] = 0;
+      ++argc;
+  }
 
-  argv_size = tmp_argv_size;
+  argv_size = argv_size_tmp;
 
   /* Open executable file. */
-  file = filesys_open (file_name);
+  file = filesys_open (file_name_copy);
   if (file == NULL) 
     {
-      printf ("load: %s: open failed\n", file_name);
+      printf ("load: %s: open failed\n", file_name_copy);
       goto done; 
     }
 
@@ -284,9 +288,11 @@ load (const char *file_name, void (**eip) (void), void **esp)
       || ehdr.e_phentsize != sizeof (struct Elf32_Phdr)
       || ehdr.e_phnum > 1024) 
     {
-      printf ("load: %s: error loading executable\n", file_name);
+      printf ("load: %s: error loading executable\n", file_name_copy);
       goto done; 
     }
+
+  printf("🤖 debug 3\n");
 
   /* Read program headers. */
   file_ofset = ehdr.e_phoff;
@@ -315,8 +321,10 @@ load (const char *file_name, void (**eip) (void), void **esp)
         case PT_SHLIB:
           goto done;
         case PT_LOAD:
+          printf("🤖 debug 3-1\n");
           if (validate_segment (&phdr, file)) 
             {
+              printf("🤖 debug 3-2\n");
               bool writable = (phdr.p_flags & PF_W) != 0;
               uint32_t file_page = phdr.p_offset & ~PGMASK;
               uint32_t mem_page = phdr.p_vaddr & ~PGMASK;
@@ -347,6 +355,8 @@ load (const char *file_name, void (**eip) (void), void **esp)
         }
     }
 
+  printf("🤖 debug 4\n");
+
   /* Set up stack. */
   if (!setup_stack (esp))
     goto done;
@@ -356,7 +366,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
   
   // To be added constructing esp
   
-  printf("🤖 debug 1\n");
+  printf("🤖 debug 5 -- argc : %d\n", argc);
   
   argv_ptr = (char*) *esp - argv_size;
   *esp = (void*) ((uintptr_t) argv_ptr & 0xfffffffc);
@@ -364,34 +374,46 @@ load (const char *file_name, void (**eip) (void), void **esp)
   for(i = 0; i < align_size; ++i)
       * ((char*) *esp + i) = 0;
 
-  argv = (char**) *esp - argc - 2;
-  *argv = (char*) (argv + 1);
+  *esp = (void*) ((void**) *esp - argc - 2);
+  argv = * ((char***) *esp) = (char**) ((void**) *esp + 1);
 
-  name_ptr = cpy_file_name;
+  printf("[Debug] debug 5-1 - *esp = 0x%08p, argv = 0x%08p\n", *esp, argv);
+
+  name_ptr = file_name_copy;
   for(i = 0; i < argc; ++i)
     {
-      argv[i] = (char*) *esp;
-      tmp_argv_size = 0;
+      argv[i] = argv_ptr;
+      argv_size_tmp = 0;
       do
         {
-          argv[i][tmp_argv_size] = name_ptr[tmp_argv_size];
+          argv[i][argv_size_tmp] = name_ptr[argv_size_tmp];
         } 
-      while(name_ptr[tmp_argv_size++]);
-      name_ptr = name_ptr+tmp_argv_size;
-      *esp = (void*) ((char*) *esp + tmp_argv_size);
+      while(name_ptr[argv_size_tmp++]);
+      name_ptr = name_ptr+argv_size_tmp;
+      argv_ptr += argv_size_tmp;
     }
+
+  
+  printf("🤖 debug 5-2\n");
+
   argv[argc] = NULL;
-  * ((uint8_t*) argv[argc+1]) = 0;
-  * ((int*) argv-1) = argc;
-  * ((void (**) (void)) argv-2) = NULL;
+  printf("[Debug] debug 5-3\n");
+  * ( (int32_t*) ((void**) *esp - 1) ) = argc;
+  * ( (void (**) (void)) ((void**) *esp - 2) ) = NULL;
+  printf("[Debug] debug 5-4\n");
 
-  *esp = (void*) argv-2;
+  *esp = (void*) ((void**) *esp - 2);
 
-  hex_dump((uintptr_t) *esp, (const char *) *esp, PHYS_BASE - (uintptr_t) *esp, true);
+  printf("[Debug] debug 5-5 - *esp = 0x%08p\n", *esp);
+
+  hex_dump((uintptr_t) *esp, (const char *) *esp, (uintptr_t) PHYS_BASE - (uintptr_t) *esp, true);
 
   success = true;
 
  done:
+
+  printf("🤖 debug F(6)\n");
+
   /* We arrive here whether the load is successful or not. */
   file_close (file);
   return success;
@@ -439,7 +461,7 @@ validate_segment (const struct Elf32_Phdr *phdr, struct file *file)
      it then user code that passed a null pointer to system calls
      could quite likely panic the kernel by way of null pointer
      assertions in memcpy(), etc. */
-  if (phdr->p_vaddr < PGSIZE)
+  if (phdr->p_offset < PGSIZE)
     return false;
 
   /* It's okay. */
