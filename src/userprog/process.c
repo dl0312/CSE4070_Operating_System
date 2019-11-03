@@ -17,6 +17,7 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "threads/malloc.h"
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
@@ -37,6 +38,8 @@ process_execute (const char *file_name)
   if (fn_copy == NULL)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
+
+  printf("🤖 process_execute()\n");
 
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
@@ -59,6 +62,8 @@ start_process (void *file_name_)
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
+  // debug - taeguk but not working hihi
+  printf("🤖 start_process()\n");
   success = load (file_name, &if_.eip, &if_.esp);
 
   /* If load failed, quit. */
@@ -88,6 +93,7 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
+  // must be implemented
   return -1;
 }
 
@@ -214,12 +220,52 @@ load (const char *file_name, void (**eip) (void), void **esp)
   off_t file_ofset;
   bool success = false;
   int i;
+  int filename_len, argv_size, tmp_argv_size, align_size;
+  char *cpy_file_name, *argv_ptr, *name_ptr;
+  bool skip_flag;
+  // argc 는, 프로그램을 실행할 때 지정해 준 "명령행 옵션"의 "개수"가 저장되는 곳입니다.
+  int argc = 0;
+  // argv 는, 프로그램을 실행할 때 지정해 준 "명령행 옵션의 문자열들"이 실제로 저장되는 배열입니다.
+  char **argv;
 
   /* Allocate and activate page directory. */
   t->pagedir = pagedir_create ();
   if (t->pagedir == NULL) 
     goto done;
   process_activate ();
+
+  // To be added parsing file_name - taeguk
+  // file_name contains program file name and arguments.
+  // file_name is reset to purely program file name.
+  
+  printf("🤖 debug 1\n");
+  
+  filename_len = strlen(file_name);
+  cpy_file_name = (char*) malloc(filename_len + 1);
+
+  skip_flag = false;
+  for(i = 0, tmp_argv_size = 0; file_name[i]; ++i)
+    {
+      if(file_name[i] == ' ' || file_name[i] == '\t')
+        {
+          if(skip_flag)
+              continue;
+          cpy_file_name[tmp_argv_size++] = 0;
+          ++argv_size;
+          ++argc;
+          skip_flag = true;
+        }
+      else
+        {
+          cpy_file_name[tmp_argv_size++] = file_name[i];
+          skip_flag = false;
+        }
+    }
+
+  if(!skip_flag)
+      cpy_file_name[tmp_argv_size++] = 0;
+
+  argv_size = tmp_argv_size;
 
   /* Open executable file. */
   file = filesys_open (file_name);
@@ -307,6 +353,41 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
+  
+  // To be added constructing esp
+  
+  printf("🤖 debug 1\n");
+  
+  argv_ptr = (char*) *esp - argv_size;
+  *esp = (void*) ((uintptr_t) argv_ptr & 0xfffffffc);
+  align_size = (uintptr_t) argv_ptr & 0x00000003;
+  for(i = 0; i < align_size; ++i)
+      * ((char*) *esp + i) = 0;
+
+  argv = (char**) *esp - argc - 2;
+  *argv = (char*) (argv + 1);
+
+  name_ptr = cpy_file_name;
+  for(i = 0; i < argc; ++i)
+    {
+      argv[i] = (char*) *esp;
+      tmp_argv_size = 0;
+      do
+        {
+          argv[i][tmp_argv_size] = name_ptr[tmp_argv_size];
+        } 
+      while(name_ptr[tmp_argv_size++]);
+      name_ptr = name_ptr+tmp_argv_size;
+      *esp = (void*) ((char*) *esp + tmp_argv_size);
+    }
+  argv[argc] = NULL;
+  * ((uint8_t*) argv[argc+1]) = 0;
+  * ((int*) argv-1) = argc;
+  * ((void (**) (void)) argv-2) = NULL;
+
+  *esp = (void*) argv-2;
+
+  hex_dump((uintptr_t) *esp, (const char *) *esp, PHYS_BASE - (uintptr_t) *esp, true);
 
   success = true;
 
