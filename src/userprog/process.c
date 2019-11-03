@@ -377,7 +377,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
   *esp = (void*) ((void**) *esp - argc - 2);
   argv = * ((char***) *esp) = (char**) ((void**) *esp + 1);
 
-  printf("[Debug] debug 5-1 - *esp = 0x%08p, argv = 0x%08p\n", *esp, argv);
+  // printf("🤖 debug 5-1 - *esp = 0x%08p, argv = 0x%08p\n", *esp, argv);
 
   name_ptr = file_name_copy;
   for(i = 0; i < argc; ++i)
@@ -397,14 +397,14 @@ load (const char *file_name, void (**eip) (void), void **esp)
   printf("🤖 debug 5-2\n");
 
   argv[argc] = NULL;
-  printf("[Debug] debug 5-3\n");
+  printf("🤖 debug 5-3\n");
   * ( (int32_t*) ((void**) *esp - 1) ) = argc;
   * ( (void (**) (void)) ((void**) *esp - 2) ) = NULL;
-  printf("[Debug] debug 5-4\n");
+  printf("🤖 debug 5-4\n");
 
   *esp = (void*) ((void**) *esp - 2);
 
-  printf("[Debug] debug 5-5 - *esp = 0x%08p\n", *esp);
+  // printf("[Debug] debug 5-5 - *esp = 0x%08p\n", *esp);
 
   hex_dump((uintptr_t) *esp, (const char *) *esp, (uintptr_t) PHYS_BASE - (uintptr_t) *esp, true);
 

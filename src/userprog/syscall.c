@@ -18,5 +18,5 @@ syscall_handler (struct intr_frame *f UNUSED)
   uint32_t syscall_cnt;
   printf ("system call!\n");
   syscall_cnt = * (uint32_t*) f->esp;
-  //thread_exit ();
+  // thread_exit ();
 }
