@@ -74,3 +74,4 @@ TESTCMD += 2> $(TEST).errors $(if $(VERBOSE),|tee,>) $(TEST).output
 
 %.result: %.ck %.output
 	perl -I$(SRCDIR) $< $* $@
+tests/userprog/multi-recurse.output: TIMEOUT = 360
