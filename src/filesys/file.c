@@ -24,9 +24,7 @@ file_open (struct inode *inode)
       file->pos = 0;
       file->deny_write = false;
       return file;
-    }
-  else
-    {
+    } else {
       inode_close (inode);
       free (file);
       return NULL; 

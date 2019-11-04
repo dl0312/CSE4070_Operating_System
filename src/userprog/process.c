@@ -20,6 +20,86 @@
 #include "threads/malloc.h"
 
 static thread_func start_process NO_RETURN;
+
+void parse_file_name(char *file_name, char *parsed_file_name){
+    int target_idx; // for last index of filename
+    int file_name_length;
+    file_name_length = strlen(file_name);
+    strlcpy(parsed_file_name, file_name, file_name_length + 1);
+    for(target_idx=0; parsed_file_name[target_idx] != '\0' && parsed_file_name[target_idx] != ' '; target_idx++);
+    parsed_file_name[target_idx] = '\0';
+}
+
+void stack_consturctor(char *file_name, void **esp){
+  char ** argv;
+  int argc;
+  int total_len;
+  char stored_file_name[256];
+  char *token;
+  char *last;
+  int i;
+  int len;
+  
+  printf("start hex dump\n");
+  hex_dump(0, *esp, 1000, 1);
+  hex_dump(*esp, *esp, 100, 1);
+  
+  strlcpy(stored_file_name, file_name, strlen(file_name) + 1);
+  token = strtok_r(stored_file_name, " ", &last);
+  argc = 0;
+  /* calculate argc */
+  while (token != NULL) {
+    argc += 1;
+    token = strtok_r(NULL, " ", &last);
+  }
+  argv = (char **)malloc(sizeof(char *) * argc);
+  /* store argv */
+  strlcpy(stored_file_name, file_name, strlen(file_name) + 1);
+  for (i = 0, token = strtok_r(stored_file_name, " ", &last); i < argc; i++, token = strtok_r(NULL, " ", &last)) {
+    len = strlen(token);
+    argv[i] = token;
+
+  }
+
+  /* push argv[argc-1] ~ argv[0] */
+  total_len = 0;
+  for (i = argc - 1; 0 <= i; i --) {
+    len = strlen(argv[i]);
+    *esp -= len + 1;
+    total_len += len + 1;
+    strlcpy(*esp, argv[i], len + 1);
+    argv[i] = *esp;
+  }
+  /* push word align */
+  *esp -= total_len % 4 != 0 ? 4 - (total_len % 4) : 0;
+  /* push NULL */
+  *esp -= 4;
+  **(uint32_t **)esp = 0;
+  /* push address of argv[argc-1] ~ argv[0] */
+  for (i = argc - 1; 0 <= i; i--) {
+    *esp -= 4;
+    **(uint32_t **)esp = argv[i];
+  }
+  /* push address of argv */
+  *esp -= 4;
+  **(uint32_t **)esp = *esp + 4;
+
+  /* push argc */
+  *esp -= 4;
+  **(uint32_t **)esp = argc;
+  
+  /* push return address */
+  *esp -= 4;
+  **(uint32_t **)esp = 0;
+
+
+  printf("before hax dump\n");
+  hex_dump(0, *esp, 1000, 1);
+  hex_dump(*esp, *esp, 100, 1);
+  free(argv);
+
+}
+
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 
 /* Starts a new thread running a user program loaded from
@@ -39,8 +119,6 @@ process_execute (const char *file_name)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
 
-  printf("🤖 process_execute()\n");
-
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
@@ -56,14 +134,18 @@ start_process (void *file_name_)
   char *file_name = file_name_;
   struct intr_frame if_;
   bool success;
-
+  printf("🤖 start_process()\n");
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
-  printf("🤖 start_process()\n");
+
   success = load (file_name, &if_.eip, &if_.esp);
+  printf("🤖 file load state: %s\n", success ? "true" : "false");
+  if(success){
+    stack_consturctor(file_name, &if_.esp);
+  }
 
   /* If load failed, quit. */
   palloc_free_page (file_name);
@@ -94,9 +176,10 @@ process_wait (tid_t child_tid UNUSED)
 {
   // must be implemented
 
-  int i,j;
-  for(i=0; i<30000; ++i)
-    for(j=0; j<10000; ++j);
+  volatile int i;
+  while(true){
+    i = 0;
+  }
   return -1;
 }
 
@@ -223,13 +306,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
   off_t file_ofset;
   bool success = false;
   int i;
-  int filename_len, argv_size, argv_size_tmp, align_size;
-  char *file_name_copy, *argv_ptr, *name_ptr;
-  bool skip_flag;
-  // argc 는, 프로그램을 실행할 때 지정해 준 "명령행 옵션"의 "개수"가 저장되는 곳입니다.
-  int argc = 0;
-  // argv 는, 프로그램을 실행할 때 지정해 준 "명령행 옵션의 문자열들"이 실제로 저장되는 배열입니다.
-  char **argv;
+  char parsed_file_name[256];
 
   /* Allocate and activate page directory. */
   t->pagedir = pagedir_create ();
@@ -237,45 +314,16 @@ load (const char *file_name, void (**eip) (void), void **esp)
     goto done;
   process_activate ();
 
-  // To be added parsing file_name
-  // file_name contains program file name and arguments.
-  // file_name is reset to purely program file name.
-  
-  printf("🤖 debug 1\n");
-  
-  filename_len = strlen(file_name);
-  file_name_copy = (char*) malloc(filename_len + 1);
 
-  skip_flag = false;
-  for(i = 0, argv_size_tmp = 0; file_name[i]; ++i)
-    {
-      if(file_name[i] == ' ' || file_name[i] == '\t')
-        {
-          if(skip_flag)
-              continue;
-          file_name_copy[argv_size_tmp++] = 0;
-          ++argc;
-          skip_flag = true;
-        }
-      else
-        {
-          file_name_copy[argv_size_tmp++] = file_name[i];
-          skip_flag = false;
-        }
-    }
-
-  if(!skip_flag){
-      file_name_copy[argv_size_tmp++] = 0;
-      ++argc;
-  }
-
-  argv_size = argv_size_tmp;
+  printf("🤖 filename: %s\n", file_name);
+  parse_file_name(file_name, parsed_file_name);
+  printf("🤖 parsed filename: %s\n", parsed_file_name);
 
   /* Open executable file. */
-  file = filesys_open (file_name_copy);
+  file = filesys_open (parsed_file_name);
   if (file == NULL) 
     {
-      printf ("load: %s: open failed\n", file_name_copy);
+      printf ("load: %s: open failed\n", file_name);
       goto done; 
     }
 
@@ -288,11 +336,9 @@ load (const char *file_name, void (**eip) (void), void **esp)
       || ehdr.e_phentsize != sizeof (struct Elf32_Phdr)
       || ehdr.e_phnum > 1024) 
     {
-      printf ("load: %s: error loading executable\n", file_name_copy);
+      printf ("load: %s: error loading executable\n", file_name);
       goto done; 
     }
-
-  printf("🤖 debug 3\n");
 
   /* Read program headers. */
   file_ofset = ehdr.e_phoff;
@@ -321,10 +367,8 @@ load (const char *file_name, void (**eip) (void), void **esp)
         case PT_SHLIB:
           goto done;
         case PT_LOAD:
-          printf("🤖 debug 3-1\n");
           if (validate_segment (&phdr, file)) 
             {
-              printf("🤖 debug 3-2\n");
               bool writable = (phdr.p_flags & PF_W) != 0;
               uint32_t file_page = phdr.p_offset & ~PGMASK;
               uint32_t mem_page = phdr.p_vaddr & ~PGMASK;
@@ -355,65 +399,16 @@ load (const char *file_name, void (**eip) (void), void **esp)
         }
     }
 
-  printf("🤖 debug 4\n");
-
   /* Set up stack. */
   if (!setup_stack (esp))
     goto done;
 
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
-  
-  // To be added constructing esp
-  
-  printf("🤖 debug 5 -- argc : %d\n", argc);
-  
-  argv_ptr = (char*) *esp - argv_size;
-  *esp = (void*) ((uintptr_t) argv_ptr & 0xfffffffc);
-  align_size = (uintptr_t) argv_ptr & 0x00000003;
-  for(i = 0; i < align_size; ++i)
-      * ((char*) *esp + i) = 0;
-
-  *esp = (void*) ((void**) *esp - argc - 2);
-  argv = * ((char***) *esp) = (char**) ((void**) *esp + 1);
-
-  // printf("🤖 debug 5-1 - *esp = 0x%08p, argv = 0x%08p\n", *esp, argv);
-
-  name_ptr = file_name_copy;
-  for(i = 0; i < argc; ++i)
-    {
-      argv[i] = argv_ptr;
-      argv_size_tmp = 0;
-      do
-        {
-          argv[i][argv_size_tmp] = name_ptr[argv_size_tmp];
-        } 
-      while(name_ptr[argv_size_tmp++]);
-      name_ptr = name_ptr+argv_size_tmp;
-      argv_ptr += argv_size_tmp;
-    }
-
-  
-  printf("🤖 debug 5-2\n");
-
-  argv[argc] = NULL;
-  printf("🤖 debug 5-3\n");
-  * ( (int32_t*) ((void**) *esp - 1) ) = argc;
-  * ( (void (**) (void)) ((void**) *esp - 2) ) = NULL;
-  printf("🤖 debug 5-4\n");
-
-  *esp = (void*) ((void**) *esp - 2);
-
-  // printf("[Debug] debug 5-5 - *esp = 0x%08p\n", *esp);
-
-  hex_dump((uintptr_t) *esp, (const char *) *esp, (uintptr_t) PHYS_BASE - (uintptr_t) *esp, true);
 
   success = true;
 
  done:
-
-  printf("🤖 debug F(6)\n");
-
   /* We arrive here whether the load is successful or not. */
   file_close (file);
   return success;
