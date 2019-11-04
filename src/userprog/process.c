@@ -40,9 +40,6 @@ void stack_consturctor(char *file_name, void **esp){
   int i;
   int len;
   
-  printf("start hex dump\n");
-  hex_dump(0, *esp, 1000, 1);
-  hex_dump(*esp, *esp, 100, 1);
   
   strlcpy(stored_file_name, file_name, strlen(file_name) + 1);
   token = strtok_r(stored_file_name, " ", &last);
@@ -92,10 +89,6 @@ void stack_consturctor(char *file_name, void **esp){
   *esp -= 4;
   **(uint32_t **)esp = 0;
 
-
-  printf("before hax dump\n");
-  hex_dump(0, *esp, 1000, 1);
-  hex_dump(*esp, *esp, 100, 1);
   free(argv);
 
 }
@@ -110,6 +103,7 @@ tid_t
 process_execute (const char *file_name) 
 {
   char *fn_copy;
+  char parsed_file_name[256];
   tid_t tid;
 
   /* Make a copy of FILE_NAME.
@@ -119,10 +113,18 @@ process_execute (const char *file_name)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
 
+  parse_file_name(file_name, parsed_file_name);
+
+
+  if (filesys_open(parsed_file_name) == NULL) {
+    return -1;
+  }
+
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+  tid = thread_create (parsed_file_name, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
-    palloc_free_page (fn_copy); 
+    palloc_free_page (fn_copy);
+
   return tid;
 }
 
@@ -134,7 +136,6 @@ start_process (void *file_name_)
   char *file_name = file_name_;
   struct intr_frame if_;
   bool success;
-  printf("🤖 start_process()\n");
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
@@ -142,11 +143,9 @@ start_process (void *file_name_)
   if_.eflags = FLAG_IF | FLAG_MBS;
 
   success = load (file_name, &if_.eip, &if_.esp);
-  printf("🤖 file load state: %s\n", success ? "true" : "false");
   if(success){
     stack_consturctor(file_name, &if_.esp);
   }
-
   /* If load failed, quit. */
   palloc_free_page (file_name);
   if (!success) 
@@ -174,11 +173,19 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
-  // must be implemented
-
-  volatile int i;
-  while(true){
-    i = 0;
+  struct list_elem* e;
+  struct thread* t = NULL;
+  int exit_status;
+  
+  for (e = list_begin(&(thread_current()->child)); e != list_end(&(thread_current()->child)); e = list_next(e)) {
+    t = list_entry(e, struct thread, child_elem);
+    if (child_tid == t->tid) {
+      sema_down(&(t->child_lock));
+      exit_status = t->exit_status;
+      list_remove(&(t->child_elem));
+      sema_up(&(t->mem_lock)); /* new */
+      return exit_status;
+    }
   }
   return -1;
 }
@@ -206,6 +213,8 @@ process_exit (void)
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
+  sema_up(&(cur->child_lock));
+  sema_down(&(cur->mem_lock)); /* new */
 }
 
 /* Sets up the CPU for running user code in the current
@@ -314,14 +323,10 @@ load (const char *file_name, void (**eip) (void), void **esp)
     goto done;
   process_activate ();
 
-
-  printf("🤖 filename: %s\n", file_name);
   parse_file_name(file_name, parsed_file_name);
-  printf("🤖 parsed filename: %s\n", parsed_file_name);
 
   /* Open executable file. */
   file = filesys_open (parsed_file_name);
-  printf("💖\n");
   if (file == NULL) 
     {
       printf ("load: %s: open failed\n", file_name);
@@ -353,6 +358,8 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
       if (file_read (file, &phdr, sizeof phdr) != sizeof phdr)
         goto done;
+
+  
       file_ofset += sizeof phdr;
       switch (phdr.p_type) 
         {
@@ -394,8 +401,9 @@ load (const char *file_name, void (**eip) (void), void **esp)
                                  read_bytes, zero_bytes, writable))
                 goto done;
             }
-          else
+          else{
             goto done;
+          }
           break;
         }
     }
@@ -459,7 +467,7 @@ validate_segment (const struct Elf32_Phdr *phdr, struct file *file)
      it then user code that passed a null pointer to system calls
      could quite likely panic the kernel by way of null pointer
      assertions in memcpy(), etc. */
-  if (phdr->p_offset < PGSIZE)
+  if (phdr->p_vaddr < PGSIZE)
     return false;
 
   /* It's okay. */
