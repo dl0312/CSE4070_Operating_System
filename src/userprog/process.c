@@ -321,6 +321,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
   /* Open executable file. */
   file = filesys_open (parsed_file_name);
+  printf("💖\n");
   if (file == NULL) 
     {
       printf ("load: %s: open failed\n", file_name);
@@ -399,9 +400,11 @@ load (const char *file_name, void (**eip) (void), void **esp)
         }
     }
 
+
   /* Set up stack. */
   if (!setup_stack (esp))
     goto done;
+
 
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
