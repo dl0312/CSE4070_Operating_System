@@ -28,7 +28,7 @@
  int syscall_read (int fd, void* buffer, unsigned size) {
   int i;
   if (fd == 0) {
-    for (i = 0; i < size; i ++) {
+    for (i=0; i < size; i++) {
       if (((char *)buffer)[i] == '\0') {
         break;
       }
@@ -46,38 +46,14 @@
 }
 
 
- void 
-syscall_fibonacci (int num, int *dest)
+int syscall_fibonacci (int num)
 {
-  int a, b, c, i;
-
-  a = 0; b = c = 1;
-
-  if(num == 0)
-    *dest = 0;
-    return;
-
-  for(i = 1; i < num; ++i)
-    {
-      c = a + b;
-      a = b;
-      b = c;
-    }
-  *dest = c; 
-  return;
+	return n < 3 ? 1 : syscall_fibonacci(n - 1) + syscall_fibonacci( n - 2);
 }
 
- void
-syscall_sum_of_four_integers (void *top, int *dest)
+int syscall_sum_of_four_integers (int a, int b, int c, int d)
 {
-  /* Load syscall arguments. */
-  int a = * (int *)((uintptr_t)top);
-  int b = * (int *)((uintptr_t)top+4);
-  int c = * (int *)((uintptr_t)top+8);
-  int d = * (int *)((uintptr_t)top+12);
-
-  *dest = a+b+c+d;
-  return;
+  return a+b+c+d;
 }
 
 
@@ -138,6 +114,12 @@ syscall_handler (struct intr_frame *f UNUSED)
     case SYS_TELL:
       break;
     case SYS_CLOSE:
+      break;
+    case SYS_FIBONACCI:
+			f->eax = syscall_fibonacci(arg[1]);
+      break;
+    case SYS_SUM_OF_FOUR_INTEGERS:
+			f -> eax = syscall_sum_of_four_integers(arg[1],arg[2],arg[3],arg[4]);
       break;
   }
 }
