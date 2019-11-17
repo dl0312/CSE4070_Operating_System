@@ -461,7 +461,7 @@ init_thread(struct thread *t, const char *name, int priority)
   list_push_back(&all_list, &t->allelem);
 
 #ifdef USERPROG
-  for (i = 0; i < 128; i++)
+  for (i = 0; i < 200; i++)
   {
     t->file_descriptor[i] = NULL;
   }

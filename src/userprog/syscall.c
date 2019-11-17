@@ -75,7 +75,6 @@ int syscall_read(int file_descriptor, void *buffer, unsigned size)
 {
   int i, result;
   validate_user_vaddr(buffer);
-  lock_acquire(&filesys_lock);
   if (file_descriptor == 0)
   {
     for (i = 0; i < size; i++)
@@ -93,7 +92,6 @@ int syscall_read(int file_descriptor, void *buffer, unsigned size)
       syscall_exit(-1);
     result = file_read(thread_current()->file_descriptor[file_descriptor], buffer, size);
   }
-  lock_release(&filesys_lock);
   return result;
 }
 
@@ -246,11 +244,11 @@ void syscall_handler(struct intr_frame *f UNUSED)
     f->eax = syscall_filesize((int)*(uint32_t *)(f->esp + 4));
     break;
   case SYS_READ:
-    for (i = 0; i < 3; i++)
+    for (i = 1; i < 4; i++)
     {
       validate_user_vaddr(f->esp + 4 * i);
     }
-    syscall_read((int)*(uint32_t *)(f->esp + 4), (void *)*(uint32_t *)(f->esp + 8), (unsigned)*((uint32_t *)(f->esp + 12)));
+    f->eax = syscall_read((int)*(uint32_t *)(f->esp + 4), (void *)*(uint32_t *)(f->esp + 8), (unsigned)*((uint32_t *)(f->esp + 12)));
     break;
   case SYS_WRITE:
     f->eax = syscall_write((int)*(uint32_t *)(f->esp + 4), (void *)*(uint32_t *)(f->esp + 8), (unsigned)*((uint32_t *)(f->esp + 12)));
